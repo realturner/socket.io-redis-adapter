@@ -30,3 +30,27 @@ export function times(count: number, fn: () => void) {
     }
   };
 }
+
+export const createClient =  (() => {
+  switch (process.env.REDIS_CLIENT) {
+    case "ioredis":
+      return require("ioredis").createClient;
+    case 'ioredis-cluster':
+      const Cluster = require("ioredis").Cluster;
+      return () => {
+        return new Cluster([
+          // TODO: as environment variable
+          { host: '173.18.0.2', port: 6379 }
+        ]);
+      }
+    case "redis-v3":
+      return require("redis-v3").createClient;
+    default:
+      // redis@4
+      return async () => {
+        const client = require("redis").createClient();
+        await client.connect();
+        return client;
+      };
+  }
+})();

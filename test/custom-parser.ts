@@ -2,9 +2,8 @@ import { createServer } from "http";
 import { Server, Socket as ServerSocket } from "socket.io";
 import { io as ioc, Socket as ClientSocket } from "socket.io-client";
 import { createAdapter } from "../lib";
-import { createClient } from "redis";
 import { AddressInfo } from "net";
-import { times } from "./util";
+import { times, createClient } from "./util";
 import expect = require("expect.js");
 
 const NODES_COUNT = 3;
@@ -18,10 +17,8 @@ describe("custom parser", () => {
   beforeEach(async () => {
     for (let i = 1; i <= NODES_COUNT; i++) {
       const httpServer = createServer();
-      const pubClient = createClient();
-      const subClient = createClient();
-
-      await Promise.all([pubClient.connect(), subClient.connect()]);
+      const pubClient = await createClient();
+      const subClient = await createClient();
 
       redisClients.push(pubClient, subClient);
 
@@ -64,7 +61,11 @@ describe("custom parser", () => {
       socket.disconnect();
     });
     redisClients.forEach((redisClient) => {
-      redisClient.disconnect();
+      if (typeof redisClient.disconnect == "function") {
+        redisClient.disconnect();
+      } else {
+        redisClient.quit();
+      }
     });
   });
 

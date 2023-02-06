@@ -5,7 +5,7 @@ import expect = require("expect.js");
 import { createAdapter } from "../lib";
 import type { AddressInfo } from "net";
 
-import "./util";
+import { createClient } from "./util";
 
 let namespace1, namespace2, namespace3;
 let client1: ClientSocket, client2: ClientSocket, client3: ClientSocket;
@@ -433,22 +433,6 @@ describe(`socket.io-redis with ${
     });
   });
 });
-
-const createClient = (() => {
-  switch (process.env.REDIS_CLIENT) {
-    case "ioredis":
-      return require("ioredis").createClient;
-    case "redis-v3":
-      return require("redis-v3").createClient;
-    default:
-      // redis@4
-      return async () => {
-        const client = require("redis").createClient();
-        await client.connect();
-        return client;
-      };
-  }
-})();
 
 function _create() {
   return async (nsp, fn?) => {
