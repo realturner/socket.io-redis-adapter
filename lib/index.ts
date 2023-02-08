@@ -922,8 +922,12 @@ export class RedisAdapter extends Adapter {
         return numSub;
       });
     } else if (typeof this.pubClient.getSlotRandomNode === "function") {
+      const nodes = [
+        ...(this.pubClient.masters || []),
+        ...(this.pubClient.replicas || []),
+      ];
       return Promise.all(
-        [...this.pubClient.masters, ...this.pubClient.replicas].map((node) =>
+        nodes.map((node) =>
           this.pubClient
             .nodeClient(node)
             .sendCommand(["pubsub", "numsub", this.requestChannel])
