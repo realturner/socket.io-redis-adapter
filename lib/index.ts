@@ -197,6 +197,10 @@ export class RedisAdapter extends Adapter {
     registerFriendlyErrorHandler(this.subClient);
   }
 
+  private publish(channel, payload) {
+    this.pubClient.publish(channel, payload);
+  }
+
   /**
    * Called with a subscription message
    *
@@ -415,7 +419,7 @@ export class RedisAdapter extends Adapter {
           }
           called = true;
           debug("calling acknowledgement with %j", arg);
-          this.pubClient.publish(
+          this.publish(
             this.responseChannel,
             JSON.stringify({
               type: RequestType.SERVER_SIDE_EMIT,
@@ -485,7 +489,7 @@ export class RedisAdapter extends Adapter {
       ? `${this.responseChannel}${request.uid}#`
       : this.responseChannel;
     debug("publishing response to channel %s", responseChannel);
-    this.pubClient.publish(responseChannel, response);
+    this.publish(responseChannel, response);
   }
 
   /**
@@ -636,7 +640,7 @@ export class RedisAdapter extends Adapter {
         channel += opts.rooms.keys().next().value + "#";
       }
       debug("publishing message to channel %s", channel);
-      this.pubClient.publish(channel, msg);
+      this.publish(channel, msg);
     }
     super.broadcast(packet, opts);
   }
@@ -668,7 +672,7 @@ export class RedisAdapter extends Adapter {
         opts: rawOpts,
       });
 
-      this.pubClient.publish(this.requestChannel, request);
+      this.publish(this.requestChannel, request);
 
       this.ackRequests.set(requestId, {
         clientCountCallback,
@@ -725,7 +729,7 @@ export class RedisAdapter extends Adapter {
         rooms: localRooms,
       });
 
-      this.pubClient.publish(this.requestChannel, request);
+      this.publish(this.requestChannel, request);
     });
   }
 
@@ -774,7 +778,7 @@ export class RedisAdapter extends Adapter {
         sockets: localSockets,
       });
 
-      this.pubClient.publish(this.requestChannel, request);
+      this.publish(this.requestChannel, request);
     });
   }
 
@@ -793,7 +797,7 @@ export class RedisAdapter extends Adapter {
       rooms: [...rooms],
     });
 
-    this.pubClient.publish(this.requestChannel, request);
+    this.publish(this.requestChannel, request);
   }
 
   public delSockets(opts: BroadcastOptions, rooms: Room[]) {
@@ -811,7 +815,7 @@ export class RedisAdapter extends Adapter {
       rooms: [...rooms],
     });
 
-    this.pubClient.publish(this.requestChannel, request);
+    this.publish(this.requestChannel, request);
   }
 
   public disconnectSockets(opts: BroadcastOptions, close: boolean) {
@@ -829,7 +833,7 @@ export class RedisAdapter extends Adapter {
       close,
     });
 
-    this.pubClient.publish(this.requestChannel, request);
+    this.publish(this.requestChannel, request);
   }
 
   public serverSideEmit(packet: any[]): void {
@@ -848,7 +852,7 @@ export class RedisAdapter extends Adapter {
       data: packet,
     });
 
-    this.pubClient.publish(this.requestChannel, request);
+    this.publish(this.requestChannel, request);
   }
 
   private async serverSideEmitWithAck(packet: any[]) {
@@ -890,7 +894,7 @@ export class RedisAdapter extends Adapter {
       responses: [],
     });
 
-    this.pubClient.publish(this.requestChannel, request);
+    this.publish(this.requestChannel, request);
   }
 
   /**
