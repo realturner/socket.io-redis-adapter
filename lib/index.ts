@@ -138,7 +138,7 @@ export class RedisAdapter extends Adapter {
     const isRedisV4 = typeof this.pubClient.pSubscribe === "function";
     if (isRedisV4) {
       this.subClient.subscribe(
-        [this.channel],
+        this.channel,
         (msg, channel) => {
           this.onmessage(null, channel, msg);
         },
@@ -916,6 +916,21 @@ export class RedisAdapter extends Adapter {
           numSub += parseInt(value[1], 10);
         });
         return numSub;
+      });
+    } else if (typeof this.pubClient.getSlotRandomNode === "function") {
+      return Promise.all(
+        [...this.pubClient.masters, ...this.pubClient.replicas].map((node) =>
+          this.pubClient
+            .nodeClient(node)
+            .sendCommand(["pubsub", "numsub", this.requestChannel])
+            .then((res) => parseInt(res[1], 10))
+        )
+      ).then((values) => {
+        let sum = 0;
+        for (const value of values) {
+          sum += value;
+        }
+        return sum;
       });
     } else if (typeof this.pubClient.pSubscribe === "function") {
       return this.pubClient

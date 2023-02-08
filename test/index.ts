@@ -192,7 +192,10 @@ describe(`socket.io-redis with ${
     });
   });
 
-  if (process.env.REDIS_CLIENT === undefined) {
+  if (
+    process.env.REDIS_CLIENT === undefined ||
+    process.env.REDIS_CLIENT === "redis-v4-cluster"
+  ) {
     // redis@4
     it("ignores messages from unknown channels", (done) => {
       namespace1.adapter.subClient
