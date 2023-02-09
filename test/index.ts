@@ -13,8 +13,15 @@ let socket1: ServerSocket, socket2: ServerSocket, socket3: ServerSocket;
 
 const shouldNotHappen = (done) => () => done(new Error("should not happen"));
 
-describe(`socket.io-redis with ${
-  process.env.REDIS_CLIENT || "redis@4"
+const flags = [];
+if (process.env.SPECIFIC_CHANNEL !== undefined) {
+  flags.push("specific-channel");
+}
+if (process.env.SHARDED_PUBSUB !== undefined) {
+  flags.push("sharded-pubsub");
+}
+describe(`socket.io-redis with ${process.env.REDIS_CLIENT || "redis@4"}${
+  flags.length > 0 ? ` (${flags.join(", ")})` : ""
 }`, () => {
   beforeEach(init());
   afterEach(cleanup);
@@ -445,6 +452,8 @@ function _create() {
       createAdapter(await createClient(), await createClient(), {
         publishOnSpecificResponseChannel:
           process.env.SPECIFIC_CHANNEL !== undefined,
+        shardedPubSub: process.env.SHARDED_PUBSUB !== undefined,
+        pubDelay: (process.env.REDIS_CLIENT || "").endsWith("-cluster") ? 5 : 0,
       })
     );
     httpServer.listen((err) => {

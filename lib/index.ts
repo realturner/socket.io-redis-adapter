@@ -68,6 +68,22 @@ export interface RedisAdapterOptions {
    */
   publishOnSpecificResponseChannel: boolean;
   /**
+   * Whether to publish / subscribe using sharded command introduced in 7.0.0
+   *
+   * - if true, will use spublish / ssubscribe
+   * - if false, will use publish / subscribe command
+   *
+   * Currently only redis@4 will be supported.
+   *
+   * @default false
+   */
+  shardedPubSub: boolean;
+  /**
+   * Number of ms to be delayed before sending sPublish/publish command
+   * @default 0
+   */
+  pubDelay: number;
+  /**
    * The parser to use for encoding and decoding messages sent to Redis.
    * This option defaults to using `notepack.io`, a MessagePack implementation.
    */
@@ -104,6 +120,8 @@ export class RedisAdapter extends Adapter {
   private readonly responseChannel: string;
   private requests: Map<string, Request> = new Map();
   private ackRequests: Map<string, AckRequest> = new Map();
+  private readonly sharded: boolean;
+  private readonly publish: (channel, payload) => void;
 
   /**
    * Adapter constructor.
@@ -135,8 +153,47 @@ export class RedisAdapter extends Adapter {
     this.responseChannel = prefix + "-response#" + this.nsp.name + "#";
     const specificResponseChannel = this.responseChannel + this.uid + "#";
 
+    this.sharded = false;
+
     const isRedisV4 = typeof this.pubClient.pSubscribe === "function";
-    if (isRedisV4) {
+    const isRedisV4Cluster =
+      isRedisV4 && typeof this.pubClient.getSlotRandomNode === "function";
+    if (opts.shardedPubSub && isRedisV4Cluster) {
+      this.sharded = true;
+      this.subClient.sSubscribe(
+        this.channel,
+        (msg, channel) => {
+          this.onmessage(null, channel, msg);
+        },
+        true
+      );
+      this.on("create-room", (room) => {
+        this.subClient.sSubscribe(
+          this.channel + room + "#",
+          (msg, channel) => {
+            this.onmessage(null, channel, msg);
+          },
+          true
+        );
+      });
+      this.on("delete-room", (room) => {
+        this.subClient.sUnsubscribe(this.channel + room + "#");
+      });
+      const subChannels = [
+        this.requestChannel,
+        this.responseChannel,
+        specificResponseChannel,
+      ];
+      subChannels.forEach((subChannel) =>
+        this.subClient.sSubscribe(
+          subChannel,
+          (msg, channel) => {
+            this.onrequest(channel, msg);
+          },
+          true
+        )
+      );
+    } else if (isRedisV4) {
       this.subClient.subscribe(
         this.channel,
         (msg, channel) => {
@@ -185,6 +242,20 @@ export class RedisAdapter extends Adapter {
       });
     }
 
+    this.publish = (() => {
+      const pub = this.sharded
+        ? this.pubClient.sPublish.bind(this.pubClient)
+        : this.pubClient.publish.bind(this.pubClient);
+      const delay = opts.pubDelay || 0;
+      return delay > 0
+        ? (channel, payload) => {
+            setTimeout(() => {
+              pub(channel, payload);
+            }, delay);
+          }
+        : pub;
+    })();
+
     const registerFriendlyErrorHandler = (redisClient) => {
       redisClient.on("error", () => {
         if (redisClient.listenerCount("error") === 1) {
@@ -195,10 +266,6 @@ export class RedisAdapter extends Adapter {
 
     registerFriendlyErrorHandler(this.pubClient);
     registerFriendlyErrorHandler(this.subClient);
-  }
-
-  private publish(channel, payload) {
-    this.pubClient.publish(channel, payload);
   }
 
   /**
@@ -922,24 +989,41 @@ export class RedisAdapter extends Adapter {
         return numSub;
       });
     } else if (typeof this.pubClient.getSlotRandomNode === "function") {
-      const nodes = [
-        ...(this.pubClient.masters || []),
-        ...(this.pubClient.replicas || []),
-      ];
-      return Promise.all(
-        nodes.map((node) =>
-          this.pubClient
-            .nodeClient(node)
-            .sendCommand(["pubsub", "numsub", this.requestChannel])
-            .then((res) => parseInt(res[1], 10))
-        )
-      ).then((values) => {
-        let sum = 0;
-        for (const value of values) {
-          sum += value;
-        }
-        return sum;
-      });
+      // redis@4 cluster
+      if (this.sharded) {
+        return this.pubClient
+          .sendCommand(this.requestChannel, true, [
+            "cluster",
+            "keyslot",
+            this.requestChannel,
+          ])
+          .then((slot) =>
+            this.pubClient.nodeClient(this.pubClient.slots[slot].master)
+          )
+          .then((client) =>
+            client.sendCommand(["pubsub", "shardnumsub", this.requestChannel])
+          )
+          .then((resp) => resp[1] as number);
+      } else {
+        const nodes = [
+          ...(this.pubClient.masters || []),
+          ...(this.pubClient.replicas || []),
+        ];
+        return Promise.all(
+          nodes.map((node) =>
+            this.pubClient
+              .nodeClient(node)
+              .sendCommand(["pubsub", "numsub", this.requestChannel])
+              .then((res) => parseInt(res[1], 10))
+          )
+        ).then((values) => {
+          let sum = 0;
+          for (const value of values) {
+            sum += value;
+          }
+          return sum;
+        });
+      }
     } else if (typeof this.pubClient.pSubscribe === "function") {
       return this.pubClient
         .sendCommand(["pubsub", "numsub", this.requestChannel])
