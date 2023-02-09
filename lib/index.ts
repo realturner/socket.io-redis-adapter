@@ -992,17 +992,11 @@ export class RedisAdapter extends Adapter {
       // redis@4 cluster
       if (this.sharded) {
         return this.pubClient
-          .sendCommand(this.requestChannel, true, [
-            "cluster",
-            "keyslot",
+          .sendCommand(this.requestChannel, false, [
+            "pubsub",
+            "shardnumsub",
             this.requestChannel,
           ])
-          .then((slot) =>
-            this.pubClient.nodeClient(this.pubClient.slots[slot].master)
-          )
-          .then((client) =>
-            client.sendCommand(["pubsub", "shardnumsub", this.requestChannel])
-          )
           .then((resp) => resp[1] as number);
       } else {
         const nodes = [
