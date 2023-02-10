@@ -116,7 +116,6 @@ export class RedisAdapter extends Adapter {
   private requests: Map<string, Request> = new Map();
   private ackRequests: Map<string, AckRequest> = new Map();
   private readonly sharded: boolean;
-  private readonly publish: (channel, payload) => void;
 
   /**
    * Adapter constructor.
@@ -162,31 +161,36 @@ export class RedisAdapter extends Adapter {
         },
         true
       );
+      const rooms = new Map<string, (channel, msg) => void>();
       this.on("create-room", (room) => {
-        this.subClient.sSubscribe(
-          this.channel + room + "#",
-          (msg, channel) => {
-            this.onmessage(null, channel, msg);
-          },
-          true
-        );
+        const listener = (msg, channel) => {
+          this.onmessage(null, channel, msg);
+        };
+        rooms.set(room, listener);
+        this.subClient.sSubscribe(this.channel + room + "#", listener, true);
       });
       this.on("delete-room", (room) => {
-        this.subClient.sUnsubscribe(this.channel + room + "#");
+        if (rooms.has(room)) {
+          const listener = rooms.get(room);
+          this.subClient
+            .sUnsubscribe(this.channel + room + "#", listener)
+            .catch((error) => {
+              if (error.message !== "The client is closed") {
+                this.subClient.emit(
+                  "error",
+                  new Error(`Failed to sUnsubscribe: ${error.message}`)
+                );
+              }
+            });
+          rooms.delete(room);
+        }
       });
-      const subChannels = [
-        this.requestChannel,
-        this.responseChannel,
-        specificResponseChannel,
-      ];
-      subChannels.forEach((subChannel) =>
-        this.subClient.sSubscribe(
-          subChannel,
-          (msg, channel) => {
-            this.onrequest(channel, msg);
-          },
-          true
-        )
+      this.subClient.subscribe(
+        [this.requestChannel, this.responseChannel, specificResponseChannel],
+        (msg, channel) => {
+          this.onrequest(channel, msg);
+        },
+        true
       );
     } else if (isRedisV4) {
       this.subClient.subscribe(
@@ -236,12 +240,6 @@ export class RedisAdapter extends Adapter {
         return await this.onrequest(channel, msg);
       });
     }
-
-    this.publish = !this.pubClient
-      ? () => null
-      : this.sharded
-      ? this.pubClient.sPublish.bind(this.pubClient)
-      : this.pubClient.publish.bind(this.pubClient);
 
     const registerFriendlyErrorHandler = (redisClient) => {
       redisClient.on("error", () => {
@@ -473,7 +471,7 @@ export class RedisAdapter extends Adapter {
           }
           called = true;
           debug("calling acknowledgement with %j", arg);
-          this.publish(
+          this.pubClient.publish(
             this.responseChannel,
             JSON.stringify({
               type: RequestType.SERVER_SIDE_EMIT,
@@ -543,7 +541,7 @@ export class RedisAdapter extends Adapter {
       ? `${this.responseChannel}${request.uid}#`
       : this.responseChannel;
     debug("publishing response to channel %s", responseChannel);
-    this.publish(responseChannel, response);
+    this.pubClient.publish(responseChannel, response);
   }
 
   /**
@@ -694,7 +692,11 @@ export class RedisAdapter extends Adapter {
         channel += opts.rooms.keys().next().value + "#";
       }
       debug("publishing message to channel %s", channel);
-      this.publish(channel, msg);
+      if (this.sharded) {
+        this.pubClient.sPublish(channel, msg);
+      } else {
+        this.pubClient.publish(channel, msg);
+      }
     }
     super.broadcast(packet, opts);
   }
@@ -726,7 +728,7 @@ export class RedisAdapter extends Adapter {
         opts: rawOpts,
       });
 
-      this.publish(this.requestChannel, request);
+      this.pubClient.publish(this.requestChannel, request);
 
       this.ackRequests.set(requestId, {
         clientCountCallback,
@@ -783,7 +785,7 @@ export class RedisAdapter extends Adapter {
         rooms: localRooms,
       });
 
-      this.publish(this.requestChannel, request);
+      this.pubClient.publish(this.requestChannel, request);
     });
   }
 
@@ -832,7 +834,7 @@ export class RedisAdapter extends Adapter {
         sockets: localSockets,
       });
 
-      this.publish(this.requestChannel, request);
+      this.pubClient.publish(this.requestChannel, request);
     });
   }
 
@@ -851,7 +853,7 @@ export class RedisAdapter extends Adapter {
       rooms: [...rooms],
     });
 
-    this.publish(this.requestChannel, request);
+    this.pubClient.publish(this.requestChannel, request);
   }
 
   public delSockets(opts: BroadcastOptions, rooms: Room[]) {
@@ -869,7 +871,7 @@ export class RedisAdapter extends Adapter {
       rooms: [...rooms],
     });
 
-    this.publish(this.requestChannel, request);
+    this.pubClient.publish(this.requestChannel, request);
   }
 
   public disconnectSockets(opts: BroadcastOptions, close: boolean) {
@@ -887,7 +889,7 @@ export class RedisAdapter extends Adapter {
       close,
     });
 
-    this.publish(this.requestChannel, request);
+    this.pubClient.publish(this.requestChannel, request);
   }
 
   public serverSideEmit(packet: any[]): void {
@@ -906,7 +908,7 @@ export class RedisAdapter extends Adapter {
       data: packet,
     });
 
-    this.publish(this.requestChannel, request);
+    this.pubClient.publish(this.requestChannel, request);
   }
 
   private async serverSideEmitWithAck(packet: any[]) {
@@ -948,7 +950,7 @@ export class RedisAdapter extends Adapter {
       responses: [],
     });
 
-    this.publish(this.requestChannel, request);
+    this.pubClient.publish(this.requestChannel, request);
   }
 
   /**
@@ -977,34 +979,27 @@ export class RedisAdapter extends Adapter {
       });
     } else if (typeof this.pubClient.getSlotRandomNode === "function") {
       // redis@4 cluster
-      if (this.sharded) {
-        return this.pubClient
-          .sendCommand(this.requestChannel, false, [
+      const nodes = [
+        ...(this.pubClient.masters || []),
+        ...(this.pubClient.replicas || []),
+      ];
+      return Promise.all(
+        nodes.map(async (node) => {
+          const client = await this.pubClient.nodeClient(node);
+          const res = await client.sendCommand([
             "pubsub",
-            "shardnumsub",
+            "numsub",
             this.requestChannel,
-          ])
-          .then((resp) => resp[1] as number);
-      } else {
-        const nodes = [
-          ...(this.pubClient.masters || []),
-          ...(this.pubClient.replicas || []),
-        ];
-        return Promise.all(
-          nodes.map((node) =>
-            this.pubClient
-              .nodeClient(node)
-              .sendCommand(["pubsub", "numsub", this.requestChannel])
-              .then((res) => parseInt(res[1], 10))
-          )
-        ).then((values) => {
-          let sum = 0;
-          for (const value of values) {
-            sum += value;
-          }
-          return sum;
-        });
-      }
+          ]);
+          return parseInt(res[1], 10);
+        })
+      ).then((values) => {
+        let sum = 0;
+        for (const value of values) {
+          sum += value;
+        }
+        return sum;
+      });
     } else if (typeof this.pubClient.pSubscribe === "function") {
       return this.pubClient
         .sendCommand(["pubsub", "numsub", this.requestChannel])
