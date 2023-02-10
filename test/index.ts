@@ -42,7 +42,9 @@ describe(`socket.io-redis with ${process.env.REDIS_CLIENT || "redis@4"}${
 
   it("broadcasts to a room", (done) => {
     socket1.join("woot");
-    socket2.broadcast.to("woot").emit("broadcast");
+    setTimeout(() => {
+      socket2.broadcast.to("woot").emit("broadcast");
+    }, 20);
 
     client1.on("broadcast", done);
     client2.on("broadcast", shouldNotHappen(done));
@@ -52,7 +54,9 @@ describe(`socket.io-redis with ${process.env.REDIS_CLIENT || "redis@4"}${
   it("broadcasts to a numeric room", (done) => {
     // @ts-ignore
     socket1.join(123);
-    namespace2.to(123).emit("broadcast");
+    setTimeout(() => {
+      namespace2.to(123).emit("broadcast");
+    }, 20);
 
     client1.on("broadcast", done);
     client2.on("broadcast", shouldNotHappen(done));
@@ -61,7 +65,9 @@ describe(`socket.io-redis with ${process.env.REDIS_CLIENT || "redis@4"}${
 
   it("uses a namespace to broadcast to rooms", (done) => {
     socket1.join("woot");
-    namespace2.to("woot").emit("broadcast");
+    setTimeout(() => {
+      namespace2.to("woot").emit("broadcast");
+    }, 20);
 
     client1.on("broadcast", done);
     client2.on("broadcast", shouldNotHappen(done));

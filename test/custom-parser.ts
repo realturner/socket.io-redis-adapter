@@ -81,6 +81,8 @@ describe("custom parser", () => {
       });
     });
 
-    servers[0].emit("test", 1, "2", [3]);
+    setTimeout(() => {
+      servers[0].emit("test", 1, "2", [3]);
+    }, 20);
   });
 });
