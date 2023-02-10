@@ -459,7 +459,6 @@ function _create() {
         publishOnSpecificResponseChannel:
           process.env.SPECIFIC_CHANNEL !== undefined,
         shardedPubSub: process.env.SHARDED_PUBSUB !== undefined,
-        pubDelay: (process.env.REDIS_CLIENT || "").endsWith("-cluster") ? 5 : 0,
       })
     );
     httpServer.listen((err) => {

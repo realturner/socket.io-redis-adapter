@@ -79,11 +79,6 @@ export interface RedisAdapterOptions {
    */
   shardedPubSub: boolean;
   /**
-   * Number of ms to be delayed before sending sPublish/publish command
-   * @default 0
-   */
-  pubDelay: number;
-  /**
    * The parser to use for encoding and decoding messages sent to Redis.
    * This option defaults to using `notepack.io`, a MessagePack implementation.
    */
@@ -242,19 +237,11 @@ export class RedisAdapter extends Adapter {
       });
     }
 
-    this.publish = (() => {
-      const pub = this.sharded
-        ? this.pubClient.sPublish.bind(this.pubClient)
-        : this.pubClient.publish.bind(this.pubClient);
-      const delay = opts.pubDelay || 0;
-      return delay > 0
-        ? (channel, payload) => {
-            setTimeout(() => {
-              pub(channel, payload);
-            }, delay);
-          }
-        : pub;
-    })();
+    this.publish = !this.pubClient
+      ? () => null
+      : this.sharded
+      ? this.pubClient.sPublish.bind(this.pubClient)
+      : this.pubClient.publish.bind(this.pubClient);
 
     const registerFriendlyErrorHandler = (redisClient) => {
       redisClient.on("error", () => {
