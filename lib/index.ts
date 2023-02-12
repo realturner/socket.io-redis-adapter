@@ -154,7 +154,7 @@ export class RedisAdapter extends Adapter {
       isRedisV4 && typeof this.pubClient.getSlotRandomNode === "function";
     if (opts.shardedPubSub && isRedisV4Cluster) {
       this.sharded = true;
-      this.subClient.sSubscribe(
+      this.subClient.subscribe(
         this.channel,
         (msg, channel) => {
           this.onmessage(null, channel, msg);
@@ -185,8 +185,15 @@ export class RedisAdapter extends Adapter {
           rooms.delete(room);
         }
       });
+      this.subClient.sSubscribe(
+        specificResponseChannel,
+        (msg, channel) => {
+          this.onrequest(channel, msg);
+        },
+        true
+      );
       this.subClient.subscribe(
-        [this.requestChannel, this.responseChannel, specificResponseChannel],
+        [this.requestChannel, this.responseChannel],
         (msg, channel) => {
           this.onrequest(channel, msg);
         },
@@ -541,7 +548,11 @@ export class RedisAdapter extends Adapter {
       ? `${this.responseChannel}${request.uid}#`
       : this.responseChannel;
     debug("publishing response to channel %s", responseChannel);
-    this.pubClient.publish(responseChannel, response);
+    if (this.sharded && this.publishOnSpecificResponseChannel) {
+      this.pubClient.sPublish(responseChannel, response);
+    } else {
+      this.pubClient.publish(responseChannel, response);
+    }
   }
 
   /**
@@ -692,7 +703,7 @@ export class RedisAdapter extends Adapter {
         channel += opts.rooms.keys().next().value + "#";
       }
       debug("publishing message to channel %s", channel);
-      if (this.sharded) {
+      if (this.sharded && opts.rooms.size === 1) {
         this.pubClient.sPublish(channel, msg);
       } else {
         this.pubClient.publish(channel, msg);
